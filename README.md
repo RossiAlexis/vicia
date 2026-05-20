@@ -1,51 +1,85 @@
-# Building a Remote MCP Server on Cloudflare (Without Auth)
+# Vicia
 
-This example allows you to deploy a remote MCP server that doesn't require authentication on Cloudflare Workers.
+A personal agent built on Cloudflare. Starts as a todo manager. Grows into something I actually use every day.
 
-## Get started:
+Vicia is named after a childhood nickname — viciadota, the Dota addict. Turns out the same obsessive energy that went into gaming is useful for learning a new stack.
 
-[![Deploy to Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/ai/tree/main/demos/remote-mcp-authless)
+This is a learning project, built in public. The real goal isn't the todo app — it's earning hands-on experience with the full Cloudflare agentic stack: Agents SDK, Durable Objects, Workflows, MCP, Browser Run, Sandboxes, and Artifacts. One phase at a time.
 
-This will deploy your MCP server to a URL like: `remote-mcp-server-authless.<your-account>.workers.dev/mcp`
+---
 
-Alternatively, you can use the command line below to get the remote MCP Server created on your local machine:
+## The architectural stance
 
-```bash
-npm create cloudflare@latest -- my-mcp-server --template=cloudflare/ai/demos/remote-mcp-authless
-```
+The agent is a **toolbox served over MCP**, not a chatbot.
 
-## Customizing your MCP Server
+The LLM lives in the client — Claude Desktop, Claude Code, or anything that speaks MCP. My server exposes well-defined, composable tools and manages state. That's it. No server-side LLM. No chat UI. No frontend.
 
-To add your own [tools](https://developers.cloudflare.com/agents/model-context-protocol/tools/) to the MCP server, define each tool inside the `init()` method of `src/index.ts` using `this.server.tool(...)`.
+Most agent tutorials start with a chat page and a server-side LLM. That's the architecture you'd eventually have to rip out anyway. This project skips that step entirely.
 
-## Connect to Cloudflare AI Playground
+---
 
-You can connect to your MCP server from the Cloudflare AI Playground, which is a remote MCP client:
+## Run your own
 
-1. Go to https://playground.ai.cloudflare.com/
-2. Enter your deployed MCP server URL (`remote-mcp-server-authless.<your-account>.workers.dev/mcp`)
-3. You can now use your MCP tools directly from the playground!
+This agent is personal — it holds my todos, my state, my data. There's no shared endpoint.
 
-## Connect Claude Desktop to your MCP server
+But the whole point of building this in public is that you can fork it and run your own. See [SETUP.md](./SETUP.md) for instructions.
 
-You can also connect to your remote MCP server from local MCP clients, by using the [mcp-remote proxy](https://www.npmjs.com/package/mcp-remote).
+---
 
-To connect to your MCP server from Claude Desktop, follow [Anthropic's Quickstart](https://modelcontextprotocol.io/quickstart/user) and within Claude Desktop go to Settings > Developer > Edit Config.
+## Phases
 
-Update with this configuration:
+| Phase | Goal | Status |
+|-------|------|--------|
+| 0 — Setup | Repo, Cloudflare account, local dev loop, deployed Worker | 🔄 In progress |
+| 1 — Toolbox | MCP server with todo tools, connected to Claude Desktop | ⏳ Pending |
+| 2 — Proactive | Scheduled nudges, Workflows, Agent Memory | ⏳ Pending |
+| 3 — MCP done properly | OAuth, MCP portal, Code Mode | ⏳ Pending |
+| 4 — Browser Run | Link enrichment, status watching, Human-in-the-Loop | ⏳ Pending |
+| 5 — Sandboxes | Capability registry, internal Code Mode, sandboxed execution | ⏳ Pending |
+| 6 — Artifacts | Versioned state, session forking, time-travel | ⏳ Pending |
 
-```json
-{
-	"mcpServers": {
-		"calculator": {
-			"command": "npx",
-			"args": [
-				"mcp-remote",
-				"http://localhost:8787/mcp" // or remote-mcp-server-authless.your-account.workers.dev/mcp
-			]
-		}
-	}
-}
-```
+The full plan with architecture decisions, ship criteria, and write-up prompts per phase lives in [`PLAN.md`](./PLAN.md).
 
-Restart Claude and you should see the tools become available.
+---
+
+## Stack
+
+- **[Cloudflare Workers](https://workers.cloudflare.com/)** — the runtime
+- **[Durable Objects](https://developers.cloudflare.com/durable-objects/)** — stateful agent, one per user
+- **[McpAgent](https://github.com/cloudflare/agents)** — base class from the Cloudflare Agents SDK
+- **SQLite (in the DO)** — todos and history
+- **Claude Desktop / Claude Code** — the LLM client (not on my server)
+
+---
+
+## Tools (Phase 1)
+
+| Tool | Description |
+|------|-------------|
+| `add_todo(text, context, due?)` | Add a todo. Context is `work` or `personal` — required, no default. |
+| `complete_todo(id_or_description)` | Mark done. Fuzzy-matches by description, not just ID. |
+| `query_todos(filter)` | Query by context, status, or due date. Structured input only — the LLM handles natural language. |
+| `update_context(id_or_description, new_context)` | Fix a miscategorization. |
+
+---
+
+## Follow along
+
+I'm documenting this in public — one post per phase, honest about what worked and what didn't.
+
+- Posts on [X / Twitter](https://x.com/AlexiisRossi)
+- Posts on [LinkedIn](https://www.linkedin.com/in/alexisrossi-dev/)
+
+---
+
+## Why public?
+
+Accountability, mostly. If I'm not using it daily by the end of Phase 1, the project is failing — and having the repo public makes that easy to see.
+
+Also: if you're learning the same stack and want to compare notes, open an issue or reach out.
+
+---
+
+## License
+
+MIT
