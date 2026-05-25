@@ -17,7 +17,7 @@
 	"migrations": [
 		{
 			"new_sqlite_classes": [
-				"MyMCP"
+				"ViciaAgent"
 			],
 			"tag": "v1"
 		}
@@ -25,7 +25,7 @@
 	"durable_objects": {
 		"bindings": [
 			{
-				"class_name": "MyMCP",
+				"class_name": "ViciaAgent",
 				"name": "MCP_OBJECT"
 			}
 		]

@@ -2,59 +2,117 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 
+type TodoContext = "work" | "personal";
+
+type Todo = {
+	id: string;
+	text: string;
+	context: TodoContext;
+	due?: string;
+	createdAt: string;
+	completed: boolean;
+	completedAt?: string;
+};
+
+type TodoState = {
+	todos: Todo[];
+};
+
 // Define our MCP agent with tools
-export class MyMCP extends McpAgent {
+export class ViciaAgent extends McpAgent {
 	server = new McpServer({
-		name: "Authless Calculator",
+		name: "Vicia Todo Manager",
 		version: "1.0.0",
 	});
 
-	async init() {
-		// Simple addition tool
-		this.server.registerTool(
-			"add",
-			{ inputSchema: { a: z.number(), b: z.number() } },
-			async ({ a, b }) => ({
-				content: [{ type: "text", text: String(a + b) }],
-			}),
-		);
+	initialState: TodoState = {
+		todos: [],
+	};
 
-		// Calculator tool with multiple operations
+	private getTodoState(): TodoState {
+		const state = this.state as Partial<TodoState> | undefined;
+		return {
+			todos: Array.isArray(state?.todos) ? state.todos : [],
+		};
+	}
+
+	private formatTodo(todo: Todo): string {
+		const status = todo.completed ? "done" : "open";
+		const duePart = todo.due ? ` | due: ${todo.due}` : "";
+		return `[${status}] (${todo.context}) ${todo.text} [id: ${todo.id}]${duePart}`;
+	}
+
+	async init() {
 		this.server.registerTool(
-			"calculate",
+			"add_todo",
 			{
 				inputSchema: {
-					operation: z.enum(["add", "subtract", "multiply", "divide"]),
-					a: z.number(),
-					b: z.number(),
+					text: z.string().min(1),
+					context: z.enum(["work", "personal"]),
+					due: z.string().optional(),
 				},
 			},
-			async ({ operation, a, b }) => {
-				let result: number;
-				switch (operation) {
-					case "add":
-						result = a + b;
-						break;
-					case "subtract":
-						result = a - b;
-						break;
-					case "multiply":
-						result = a * b;
-						break;
-					case "divide":
-						if (b === 0)
-							return {
-								content: [
-									{
-										type: "text",
-										text: "Error: Cannot divide by zero",
-									},
-								],
-							};
-						result = a / b;
-						break;
+			async ({ text, context, due }) => {
+				const state = this.getTodoState();
+				const normalizedText = text.trim();
+				const todo: Todo = {
+					id: crypto.randomUUID(),
+					text: normalizedText,
+					context,
+					due: due?.trim() ? due.trim() : undefined,
+					createdAt: new Date().toISOString(),
+					completed: false,
+				};
+
+				this.setState({
+					...state,
+					todos: [...state.todos, todo],
+				});
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Added todo: ${this.formatTodo(todo)}`,
+						},
+					],
+				};
+			},
+		);
+
+		this.server.registerTool(
+			"list_todos",
+			{
+				inputSchema: {
+					context: z.enum(["work", "personal"]).optional(),
+					include_completed: z.boolean().optional(),
+				},
+			},
+			async ({ context, include_completed }) => {
+				const state = this.getTodoState();
+				const filteredTodos = state.todos.filter((todo) => {
+					if (!include_completed && todo.completed) {
+						return false;
+					}
+					if (context && todo.context !== context) {
+						return false;
+					}
+					return true;
+				});
+
+				if (filteredTodos.length === 0) {
+					return {
+						content: [{ type: "text", text: "No todos found." }],
+					};
 				}
-				return { content: [{ type: "text", text: String(result) }] };
+
+				const body = filteredTodos
+					.map((todo, index) => `${index + 1}. ${this.formatTodo(todo)}`)
+					.join("\n");
+
+				return {
+					content: [{ type: "text", text: body }],
+				};
 			},
 		);
 	}
