@@ -3,6 +3,8 @@ import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 
 type TodoContext = "work" | "personal";
+type TodoStatus = "open" | "in_progress" | "completed";
+type TodoStatusFilter = TodoStatus | "all";
 
 type Todo = {
 	id: string;
@@ -10,8 +12,9 @@ type Todo = {
 	context: TodoContext;
 	due?: string;
 	createdAt: string;
-	completed: boolean;
+	status: TodoStatus;
 	completedAt?: string;
+	completed?: boolean;
 };
 
 type TodoState = {
@@ -19,7 +22,7 @@ type TodoState = {
 };
 
 // Define our MCP agent with tools
-export class ViciaAgent extends McpAgent {
+export class ViciaAgent extends McpAgent<Env, TodoState> {
 	server = new McpServer({
 		name: "Vicia Todo Manager",
 		version: "1.0.0",
@@ -30,16 +33,70 @@ export class ViciaAgent extends McpAgent {
 	};
 
 	private getTodoState(): TodoState {
-		const state = this.state as Partial<TodoState> | undefined;
+		const state = this.state;
 		return {
-			todos: Array.isArray(state?.todos) ? state.todos : [],
+			todos: Array.isArray(state?.todos)
+				? state.todos.map((todo) => this.normalizeTodo(todo))
+				: [],
+		};
+	}
+
+	private normalizeTodo(todo: Todo): Todo {
+		return {
+			...todo,
+			status: todo.status ?? (todo.completed ? "completed" : "open"),
 		};
 	}
 
 	private formatTodo(todo: Todo): string {
-		const status = todo.completed ? "done" : "open";
 		const duePart = todo.due ? ` | due: ${todo.due}` : "";
-		return `[${status}] (${todo.context}) ${todo.text} [id: ${todo.id}]${duePart}`;
+		return `[${todo.status}] (${todo.context}) ${todo.text} [id: ${todo.id}]${duePart}`;
+	}
+
+	private formatTodos(todos: Todo[]): string {
+		if (todos.length === 0) {
+			return "No todos found.";
+		}
+
+		return todos
+			.map((todo, index) => `${index + 1}. ${this.formatTodo(todo)}`)
+			.join("\n");
+	}
+
+	private findTodoMatch(idOrDescription: string): Todo | { error: string } {
+		const state = this.getTodoState();
+		const query = idOrDescription.trim().toLowerCase();
+
+		const exactIdMatch = state.todos.find((todo) => todo.id === idOrDescription.trim());
+		if (exactIdMatch) {
+			return exactIdMatch;
+		}
+
+		const exactTextMatches = state.todos.filter(
+			(todo) => todo.text.toLowerCase() === query,
+		);
+		if (exactTextMatches.length === 1) {
+			return exactTextMatches[0];
+		}
+		if (exactTextMatches.length > 1) {
+			return {
+				error: `Multiple todos exactly match that description:\n${this.formatTodos(exactTextMatches)}`,
+			};
+		}
+
+		const partialTextMatches = state.todos.filter((todo) =>
+			todo.text.toLowerCase().includes(query),
+		);
+		if (partialTextMatches.length === 1) {
+			return partialTextMatches[0];
+		}
+		if (partialTextMatches.length > 1) {
+			return {
+				error: `Multiple todos match that description:\n${this.formatTodos(partialTextMatches)}`,
+			};
+		}
+
+		return { error: `No todo found matching "${idOrDescription}".` };
 	}
 
 	async init() {
@@ -61,7 +118,7 @@ export class ViciaAgent extends McpAgent {
 					context,
 					due: due?.trim() ? due.trim() : undefined,
 					createdAt: new Date().toISOString(),
-					completed: false,
+					status: "open",
 				};
 
 				this.setState({
@@ -81,37 +138,193 @@ export class ViciaAgent extends McpAgent {
 		);
 
 		this.server.registerTool(
-			"list_todos",
+			"complete_todo",
 			{
 				inputSchema: {
-					context: z.enum(["work", "personal"]).optional(),
-					include_completed: z.boolean().optional(),
+					id_or_description: z.string().min(1),
 				},
 			},
-			async ({ context, include_completed }) => {
+			async ({ id_or_description }) => {
+				const match = this.findTodoMatch(id_or_description);
+				if ("error" in match) {
+					return {
+						content: [{ type: "text", text: match.error }],
+						isError: true,
+					};
+				}
+
+				if (match.status === "completed") {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Todo is already complete: ${this.formatTodo(match)}`,
+							},
+						],
+					};
+				}
+
 				const state = this.getTodoState();
+				const completedTodo: Todo = {
+					...match,
+					status: "completed",
+					completedAt: new Date().toISOString(),
+				};
+				this.setState({
+					...state,
+					todos: state.todos.map((todo) =>
+						todo.id === match.id ? completedTodo : todo,
+					),
+				});
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Completed todo: ${this.formatTodo(completedTodo)}`,
+						},
+					],
+				};
+			},
+		);
+
+		this.server.registerTool(
+			"query_todos",
+			{
+				inputSchema: {
+					filter: z
+						.object({
+							context: z.enum(["work", "personal"]).optional(),
+							status: z
+								.enum(["open", "in_progress", "completed", "all"])
+								.optional(),
+							due: z.string().optional(),
+						})
+						.optional(),
+				},
+			},
+			async ({ filter }) => {
+				const state = this.getTodoState();
+				const status: TodoStatusFilter = filter?.status ?? "open";
 				const filteredTodos = state.todos.filter((todo) => {
-					if (!include_completed && todo.completed) {
+					if (filter?.context && todo.context !== filter.context) {
 						return false;
 					}
-					if (context && todo.context !== context) {
+					if (status !== "all" && todo.status !== status) {
+						return false;
+					}
+					if (filter?.due && todo.due !== filter.due) {
 						return false;
 					}
 					return true;
 				});
 
-				if (filteredTodos.length === 0) {
+				return {
+					content: [{ type: "text", text: this.formatTodos(filteredTodos) }],
+				};
+			},
+		);
+
+		this.server.registerTool(
+			"update_status",
+			{
+				inputSchema: {
+					id_or_description: z.string().min(1),
+					status: z.enum(["open", "in_progress", "completed"]),
+				},
+			},
+			async ({ id_or_description, status }) => {
+				const match = this.findTodoMatch(id_or_description);
+				if ("error" in match) {
 					return {
-						content: [{ type: "text", text: "No todos found." }],
+						content: [{ type: "text", text: match.error }],
+						isError: true,
 					};
 				}
 
-				const body = filteredTodos
-					.map((todo, index) => `${index + 1}. ${this.formatTodo(todo)}`)
-					.join("\n");
+				if (match.status === status) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Todo already has status "${status}": ${this.formatTodo(match)}`,
+							},
+						],
+					};
+				}
+
+				const state = this.getTodoState();
+				const updatedTodo: Todo = {
+					...match,
+					status,
+					completedAt:
+						status === "completed" ? new Date().toISOString() : undefined,
+				};
+				this.setState({
+					...state,
+					todos: state.todos.map((todo) =>
+						todo.id === match.id ? updatedTodo : todo,
+					),
+				});
 
 				return {
-					content: [{ type: "text", text: body }],
+					content: [
+						{
+							type: "text",
+							text: `Updated todo status: ${this.formatTodo(updatedTodo)}`,
+						},
+					],
+				};
+			},
+		);
+
+		this.server.registerTool(
+			"update_context",
+			{
+				inputSchema: {
+					id_or_description: z.string().min(1),
+					new_context: z.enum(["work", "personal"]),
+				},
+			},
+			async ({ id_or_description, new_context }) => {
+				const match = this.findTodoMatch(id_or_description);
+				if ("error" in match) {
+					return {
+						content: [{ type: "text", text: match.error }],
+						isError: true,
+					};
+				}
+
+				if (match.context === new_context) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Todo already has context "${new_context}": ${this.formatTodo(match)}`,
+							},
+						],
+					};
+				}
+
+				const state = this.getTodoState();
+				const updatedTodo: Todo = {
+					...match,
+					context: new_context,
+				};
+				this.setState({
+					...state,
+					todos: state.todos.map((todo) =>
+						todo.id === match.id ? updatedTodo : todo,
+					),
+				});
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Updated todo context: ${this.formatTodo(updatedTodo)}`,
+						},
+					],
 				};
 			},
 		);

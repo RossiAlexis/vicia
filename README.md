@@ -58,7 +58,8 @@ The full plan with architecture decisions, ship criteria, and write-up prompts p
 |------|-------------|
 | `add_todo(text, context, due?)` | Add a todo. Context is `work` or `personal` — required, no default. |
 | `complete_todo(id_or_description)` | Mark done. Fuzzy-matches by description, not just ID. |
-| `query_todos(filter)` | Query by context, status, or due date. Structured input only — the LLM handles natural language. |
+| `query_todos(filter)` | Query by context, status (`open`, `in_progress`, `completed`, `all`), or due date. Structured input only — the LLM handles natural language. |
+| `update_status(id_or_description, status)` | Move a todo between `open`, `in_progress`, and `completed`. |
 | `update_context(id_or_description, new_context)` | Fix a miscategorization. |
 
 ---
